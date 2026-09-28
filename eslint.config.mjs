@@ -1,27 +1,8 @@
 import antfu from "@antfu/eslint-config"
-import pluginQuery from "@tanstack/eslint-plugin-query"
 
 export default antfu({
   stylistic: {
     quotes: "double",
-  },
-  formatters: {
-    /**
-     * Format CSS, LESS, SCSS files, also the `<style>` blocks
-     * By default uses Prettier
-     */
-    css: true,
-    /**
-     * Format HTML files
-     * By default uses Prettier
-     */
-    html: true,
-    /**
-     * Format Markdown files
-     * Supports Prettier and dprint
-     * By default uses Prettier
-     */
-    markdown: "prettier",
   },
   ignores: [
     "**/skills/**",
@@ -86,14 +67,8 @@ export default antfu({
     ignores: ["**/*.md/**", ".agents/**/*", ".claude/**/*", ".codex/**/*", ".cursor/**/*"],
   },
 ]).append({
-  plugins: {
-    "@tanstack/query": pluginQuery,
-  },
   rules: {
     "react-refresh/only-export-components": "off",
-    "@tanstack/query/exhaustive-deps": "error",
-    "@tanstack/query/no-rest-destructuring": "warn",
-    "@tanstack/query/stable-query-client": "error",
     "test/consistent-test-it": "error",
     "test/no-identical-title": "error",
     "test/prefer-hooks-on-top": "error",
