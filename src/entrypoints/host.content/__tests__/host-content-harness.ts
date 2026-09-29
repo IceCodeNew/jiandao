@@ -3,7 +3,7 @@ import { afterEach, beforeEach, vi } from "vitest"
 import { fakeBrowser } from "wxt/testing/fake-browser"
 import { ContentScriptContext } from "wxt/utils/content-script-context"
 import { storage } from "#imports"
-import { CONFIG_STORAGE_KEY } from "@/utils/constants/config"
+import { CONFIG_STORAGE_KEY, DEFAULT_CONFIG } from "@/utils/constants/config"
 import { onMessage } from "@/utils/message"
 import hostContentScript from "../index"
 
@@ -44,6 +44,18 @@ export class VisibleIntersectionObserver implements IntersectionObserver {
   }
 }
 
+/** The default config with an API key for each provider and the given translation mode. */
+export function configWithMode(mode: Config["translate"]["mode"]): Config {
+  return {
+    ...DEFAULT_CONFIG,
+    providersConfig: DEFAULT_CONFIG.providersConfig.map(provider => ({ ...provider, apiKey: "test-key" })),
+    translate: { ...DEFAULT_CONFIG.translate, mode },
+  }
+}
+
+/** A config with word-prefix emphasis on. */
+export const EMPHASIS_ON: Config = { ...configWithMode("bilingual"), reading: { wordPrefixEmphasis: true } }
+
 export async function storeConfig(config: Config) {
   await storage.setItem(`local:${CONFIG_STORAGE_KEY}`, config)
 }
@@ -56,12 +68,12 @@ export function nextAnimationFrame(): Promise<void> {
 /**
  * Sets up each test for the content script of a page: the WXT fake browser,
  * the IntersectionObserver fake, and message handlers in place of the
- * background. The background has page translation on for the tab and
- * translates each text to "translated: <text>". A test can hold the answers
- * to keep translations in flight. Each test ends the content script that it
- * started.
+ * background. The background translates each text to "translated: <text>".
+ * pageTranslation tells whether page translation is on for the tab when the
+ * content script starts. A test can hold the answers to keep translations in
+ * flight. Each test ends the content script that it started.
  */
-export function setUpHostContentTests() {
+export function setUpHostContentTests({ pageTranslation = true } = {}) {
   let removeBackground = () => {}
   let ctx: ContentScriptContext | undefined
   /** Each page translation state that the content script sends to the background, oldest first. */
@@ -75,7 +87,7 @@ export function setUpHostContentTests() {
     heldAnswers = undefined
     vi.stubGlobal("IntersectionObserver", VisibleIntersectionObserver)
     const removers = [
-      onMessage("getEnablePageTranslationFromContentScript", () => true),
+      onMessage("getEnablePageTranslationFromContentScript", () => pageTranslation),
       onMessage("reportDetectedPageLanguage", () => {}),
       onMessage("setAndNotifyPageTranslationStateChangedByManager", (message) => {
         stateMessages.push(message.data.enabled)

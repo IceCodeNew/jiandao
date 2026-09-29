@@ -18,3 +18,6 @@ export const NOTRANSLATE_CLASS = "notranslate"
 export const REACT_SHADOW_HOST_CLASS = "jiandao-react-shadow-host"
 
 export const TRANSLATION_ERROR_CONTAINER_CLASS = "jiandao-translation-error-container"
+
+// The name of the word-prefix emphasis in CSS.highlights. The preset styles paint it with ::highlight(jiandao-word-prefix).
+export const WORD_PREFIX_HIGHLIGHT = "jiandao-word-prefix"
