@@ -15,9 +15,7 @@ import { PageTranslationManager } from "./translation-control/page-translation"
 
 export async function bootstrapHostContent(ctx: ContentScriptContext) {
   ensurePresetStyles(document)
-
   const cleanupUrlListener = setupUrlChangeListener()
-
   const removeHostToast = window === window.top ? mountHostToast() : () => {}
 
   const manager = new PageTranslationManager({
@@ -26,19 +24,58 @@ export async function bootstrapHostContent(ctx: ContentScriptContext) {
     threshold: PRELOAD_THRESHOLD,
   })
 
-  // Translate the page again when the popup or the options page changes the translation mode.
-  // A change before this point needs no action: page translation starts later and reads the current config.
   const unwatchConfig = watchConfigChanges(manager)
-
-  // Turn the word-prefix emphasis on and off when the reader changes the setting.
   const wordPrefixEmphasis = createWordPrefixEmphasisController(document)
   const unsubscribeWordPrefixEmphasis = subscribeLocalConfig(config => wordPrefixEmphasis.setEnabled(config?.reading.wordPrefixEmphasis === true))
 
-  const cleanupTranslationShortcut = await bindTranslationShortcutKey(manager)
+  // Register messages before awaiting storage or the background.
+  const cleanupTranslationStateListener = onMessage("askManagerToTogglePageTranslation", (msg) => {
+    const { enabled } = msg.data
+    if (enabled === manager.isActive)
+      return
+    if (!enabled) {
+      manager.stop()
+      return
+    }
+    void manager.start().catch(error => logger.error("Failed to start page translation", error))
+  })
+
+  const cleanupFrameTranslationStateListener = window === window.top
+    ? () => {}
+    : onMessage("notifyTranslationStateChanged", (msg) => {
+        const { enabled } = msg.data
+        if (enabled === manager.isActive)
+          return
+        if (!enabled) {
+          manager.stop()
+          return
+        }
+        void manager.start().catch(error => logger.error("Failed to start page translation in an iframe", error))
+      })
 
   const detectAndReportPageLanguage = async (url: string) => {
-    const { detectedCodeOrUnd } = await detectPageLanguageLightweight()
-    void sendMessage("reportDetectedPageLanguage", { url, detectedCodeOrUnd })
+    try {
+      const { detectedCodeOrUnd } = await detectPageLanguageLightweight()
+      await sendMessage("reportDetectedPageLanguage", { url, detectedCodeOrUnd })
+    }
+    catch (error) {
+      logger.error("Failed to detect and report the page language", error)
+    }
+  }
+
+  const cleanupDetectedLanguageRefreshListener = window === window.top
+    ? onMessage("refreshDetectedPageLanguage", () => {
+        void detectAndReportPageLanguage(window.location.href)
+      })
+    : () => {}
+
+  // A failed shortcut read must not disable the popup's translation button.
+  let cleanupTranslationShortcut = () => {}
+  try {
+    cleanupTranslationShortcut = await bindTranslationShortcutKey(manager)
+  }
+  catch (error) {
+    logger.error("Failed to bind the page-translation shortcut", error)
   }
 
   // For late-loading iframes: check if translation is already enabled for this tab
@@ -51,19 +88,24 @@ export async function bootstrapHostContent(ctx: ContentScriptContext) {
     logger.error("Failed to check translation state:", error)
   }
   if (translationEnabled) {
-    void manager.start()
+    void manager.start().catch(error => logger.error("Failed to resume page translation", error))
   }
 
   const handleUrlChange = async (from: string, to: string) => {
     if (from !== to) {
       logger.info("URL changed from", from, "to", to)
-      if (manager.isActive) {
-        if (areSamePageTranslationOrigin(from, to)) {
-          await manager.restart()
+      try {
+        if (manager.isActive) {
+          if (areSamePageTranslationOrigin(from, to)) {
+            await manager.restart()
+          }
+          else {
+            manager.stop()
+          }
         }
-        else {
-          manager.stop()
-        }
+      }
+      catch (error) {
+        logger.error("Failed to update page translation after a URL change", error)
       }
       // Only the top frame should detect and set language to avoid race conditions from iframes
       if (window === window.top) {
@@ -77,29 +119,6 @@ export async function bootstrapHostContent(ctx: ContentScriptContext) {
     void handleUrlChange(from, to)
   }
   window.addEventListener("extension:URLChange", handleExtensionUrlChange)
-
-  // Listen for translation state changes from background
-  const cleanupTranslationStateListener = onMessage("askManagerToTogglePageTranslation", (msg) => {
-    const { enabled } = msg.data
-    if (enabled === manager.isActive)
-      return
-    enabled ? void manager.start() : manager.stop()
-  })
-
-  const cleanupFrameTranslationStateListener = window === window.top
-    ? () => {}
-    : onMessage("notifyTranslationStateChanged", (msg) => {
-        const { enabled } = msg.data
-        if (enabled === manager.isActive)
-          return
-        enabled ? void manager.start() : manager.stop()
-      })
-
-  const cleanupDetectedLanguageRefreshListener = window === window.top
-    ? onMessage("refreshDetectedPageLanguage", () => {
-        void detectAndReportPageLanguage(window.location.href)
-      })
-    : () => {}
 
   ctx.onInvalidated(() => {
     removeHostToast()
