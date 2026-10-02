@@ -11,6 +11,10 @@ import { storageAdapter } from "./storage-adapter"
 
 export const configAtom = atom<Config>(DEFAULT_CONFIG)
 
+// Queued tasks share this mutable record. No UI subscribes to its fields.
+// Keep the confirmed baseline separate from pending optimistic values.
+const writeBatchAtom = atom<{ confirmed: Config, pending: number } | null>(null)
+
 /**
  * Promise-chain queue for serializing storage writes.
  *
@@ -24,6 +28,8 @@ let writeQueue: Promise<void> = Promise.resolve()
 
 /**
  * Global counter to detect stale writes.
+ * The queue and counter assume one active config store per JavaScript context.
+ * Popup and settings pages have separate contexts.
  *
  * Each write captures its version at invocation time. After async storage completes,
  * we compare captured vs current version to determine if this is still the latest write.
@@ -39,8 +45,8 @@ interface PlannedWrite {
 
 /**
  * Queues one storage write and shows `optimistic` right away. `plan` runs in
- * queue order. If the write fails, the atom goes back to the stored config
- * the plan read, or else to its previous value.
+ * queue order. If the write fails, the atom goes back to the batch's last
+ * confirmed config, never another pending optimistic value.
  */
 function queueConfigWrite(
   get: Getter,
@@ -51,7 +57,9 @@ function queueConfigWrite(
   // ─────────────────────────────────────────────────────────────────────────
   // STEP 1: Optimistic update (immediate UI feedback)
   // ─────────────────────────────────────────────────────────────────────────
-  const localPrev = get(configAtom)
+  const batch = get(writeBatchAtom) ?? { confirmed: get(configAtom), pending: 0 }
+  batch.pending++
+  set(writeBatchAtom, batch)
   set(configAtom, optimistic)
 
   // Capture version for this write (used for stale-write detection later)
@@ -64,16 +72,18 @@ function queueConfigWrite(
   // Note: `.then(callback)` schedules callback to microtask queue (async),
   // but `writeQueue = task` assignment happens synchronously.
   const task = writeQueue.then(async () => {
-    let planned: PlannedWrite | undefined
     try {
       // Always read fresh from storage to capture any writes that completed before us.
       // This ensures we don't lose concurrent field updates:
       //   write({x:1}) then write({y:2}) → storage ends up with {x:1, y:2}
-      planned = await plan()
+      const planned = await plan()
+      if (planned.stored)
+        batch.confirmed = planned.stored
       const nextToPersist = planned.next
 
       // Storage write always executes (not affected by version check)
       await storageAdapter.set(CONFIG_STORAGE_KEY, nextToPersist, configSchema)
+      batch.confirmed = nextToPersist
 
       // ───────────────────────────────────────────────────────────────────
       // STEP 3: Reconcile atom with persisted value (stale-write check)
@@ -90,10 +100,14 @@ function queueConfigWrite(
 
       // Roll back, but only if we're still the latest write.
       if (currentWriteVersion === writeVersion) {
-        set(configAtom, planned?.stored ?? localPrev)
+        set(configAtom, batch.confirmed)
       }
 
       throw error
+    }
+    finally {
+      if (--batch.pending === 0)
+        set(writeBatchAtom, null)
     }
   })
 
