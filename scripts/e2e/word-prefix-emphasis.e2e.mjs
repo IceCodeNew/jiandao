@@ -8,7 +8,7 @@ import { setupDocumentFor, startFakeService } from "./fake-service.mjs"
 const SWITCH = "Bold English word starts"
 const MODE_LABELS = { bilingual: "Bilingual", translationOnly: "Translation only" }
 const PASSAGE = "Reading unfamiliar words takes practice. Keep the whole sentence in view."
-const PASSAGE_PREFIXES = ["Read", "unfam", "wor", "tak", "prac", "Ke", "th", "who", "sent", "i", "vi"]
+const PASSAGE_PREFIXES = ["Read", "unfam", "wor", "tak", "prac", "who", "sent"]
 
 const CHAT_MESSAGE = "https://example.com/lexicon?entry=cedar\n词条卡片显示读音，旁边的技术备注保持原样。\n```html\n<tr><th id=\"sound\">讀音</th>\n    <td headers=\"sound\"><span>jí qū áo yá</span></td></tr>\n```\n\n纸鸢目录中的 nebula 工具记录 maple/archive 路径，版本标签使用 cedarKey 和 FIELD_NAME。\n终端备注：使用 sample cli 查看记录。"
 const escapeHtml = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -177,6 +177,9 @@ it("user chooses word-prefix emphasis: Given an open article, When the switch is
   await options.keyboard.press("Space")
   await options.getByRole("switch", { name: SWITCH, exact: true, checked: true }).waitFor()
 
+  // Then: both settings previews use the same prefixes as the page.
+  await waitForPrefixes(options, "#reading", ["Read", "exper", "tra", "mod", "wor", "Read", "exper", "tra", "mod", "wor", "for", "eff", "pers"])
+
   // Then: code and editable text stay plain.
   await article.bringToFront()
   await waitForPrefixes(article, "#passage", PASSAGE_PREFIXES)
@@ -188,7 +191,12 @@ it("user chooses word-prefix emphasis: Given an open article, When the switch is
   assert.deepEqual(await measureLayout(article), layout)
   assert.equal(await copyPassage(article), plainCopy, "the copied text has no emphasis")
 
-  // When: the page changes the text, and the reader reloads the page.
+  // When: every word becomes short, even though emphasis remains enabled.
+  await article.evaluate(() => document.querySelector("#passage").textContent = "We go to the calm lake.")
+  await article.waitForFunction(name => ![...CSS.highlights.get(name)].some(range => document.querySelector("#passage").contains(range.startContainer)), WORD_PREFIX_HIGHLIGHT)
+  assert.deepEqual((await readHighlight(article, "#passage")).prefixes, [])
+
+  // When: longer words return, and the reader reloads the page.
   await article.evaluate(() => document.querySelector("#passage").textContent = "Updated reading material.")
 
   // Then
@@ -216,8 +224,8 @@ it("user reads pronunciation and technical text: Given a dictionary and a plain 
   // Then: the browser supplies the real Highlight API; the extension does not change source text.
   assert.deepEqual((await readHighlight(article, "#protected")).prefixes, [])
   assert.equal(await article.locator("#chat").textContent(), CHAT_MESSAGE)
-  assert.deepEqual((await readHighlight(article, "#technical")).prefixes, ["Vis", "ema", "o", "op", "Ke", "read"])
-  assert.deepEqual((await readHighlight(article, "#plain-code")).prefixes, ["Bef", "read", "Aft", "read", "Us", "caref", "Ke", "read", "Us", "an", "uncha"])
+  assert.deepEqual((await readHighlight(article, "#technical")).prefixes, ["Vis", "ema", "read"])
+  assert.deepEqual((await readHighlight(article, "#plain-code")).prefixes, ["Bef", "read", "Aft", "read", "caref", "read", "uncha"])
   assert.deepEqual((await readHighlight(article, "#foreign")).prefixes, ["Engl", "pro", "sta", "read"])
   await waitForPrefixes(article, "#language", ["Read", "dai"])
 

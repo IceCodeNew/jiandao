@@ -22,7 +22,7 @@ function textContext(node: Node): Element | null {
   return node.parentElement?.closest(TEXT_CONTEXT) ?? node.parentElement
 }
 
-/** The first half of each English word, rounded up; one-letter words stay plain. */
+/** The first half of each English word, rounded up; words of four letters or fewer stay plain. */
 function wordPrefixRanges(text: Text, plain: string): StaticRange[] {
   const languageElement = text.parentElement?.closest("[lang],[xml\\:lang]")
   const language = (languageElement?.getAttribute("lang") ?? languageElement?.getAttribute("xml:lang") ?? "").trim()
@@ -30,7 +30,7 @@ function wordPrefixRanges(text: Text, plain: string): StaticRange[] {
     return []
   const ranges: StaticRange[] = []
   for (const { 0: word, index } of plain.matchAll(WORDS)) {
-    if (word.length < 2)
+    if (word.length <= 4)
       continue
     const prefixLength = Math.ceil(word.length / 2)
     ranges.push(new StaticRange({ startContainer: text, startOffset: index, endContainer: text, endOffset: index + prefixLength }))
